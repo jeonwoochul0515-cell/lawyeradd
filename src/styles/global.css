@@ -1,0 +1,136 @@
+/* ═══════════════════════════════════════
+   Global Styles - 변호사 광고 규정 검사기
+   ═══════════════════════════════════════ */
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* 따뜻한 브라운 팔레트 */
+  --c-bg-start: #faf6f0;
+  --c-bg-end: #f0e8da;
+  --c-primary: #5c4033;
+  --c-primary-light: #6b4f3a;
+  --c-accent: #8b7355;
+  --c-accent-light: #d4a574;
+  --c-text: #3a2e22;
+  --c-text-muted: #7a6a58;
+  --c-border: #e8dfd2;
+  --c-surface: #fffdf8;
+  --c-surface-alt: #fff;
+  --c-cream: #fff8f0;
+
+  --font: "Pretendard", "Noto Sans KR", -apple-system, BlinkMacSystemFont,
+    sans-serif;
+  --radius-sm: 8px;
+  --radius-md: 13px;
+  --radius-lg: 18px;
+}
+
+body {
+  font-family: var(--font);
+  background: linear-gradient(180deg, var(--c-bg-start), var(--c-bg-end));
+  color: var(--c-text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scrollbar */
+*::-webkit-scrollbar {
+  width: 5px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #c4b8a8;
+  border-radius: 3px;
+}
+
+/* ── Animations ── */
+@keyframes dotBounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-9px);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Utility classes ── */
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.4s ease-out;
+}
+
+.animate-slide-in {
+  animation: fadeSlideIn 0.3s ease-out;
+}
+
+/* Focus */
+textarea:focus {
+  outline: none;
+}
+textarea::placeholder {
+  color: #a09080;
+}
