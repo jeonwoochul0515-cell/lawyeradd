@@ -234,7 +234,7 @@ ${truncatedText}`;
         },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
-          max_tokens: 1024,
+          max_tokens: 2048,
           system: ANALYSIS_SYSTEM,
           messages: [{ role: "user", content: userMessage }],
         }),
@@ -261,11 +261,19 @@ ${truncatedText}`;
         ?.map((b) => b.text)
         ?.join("") || "";
 
-    // JSON 파싱 시도
+    // JSON 파싱 시도 (여러 방법으로 추출)
     let analysis: AnalysisResult;
     try {
-      // ```json ... ``` 감싸기 제거
-      const jsonStr = aiText.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      // 방법1: ```json ... ``` 래핑 제거
+      let jsonStr = aiText.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+      // 방법2: 첫 번째 { 부터 마지막 } 까지 추출 (AI가 추가 텍스트를 붙인 경우)
+      const firstBrace = jsonStr.indexOf("{");
+      const lastBrace = jsonStr.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
+      }
+
       analysis = JSON.parse(jsonStr);
     } catch {
       // JSON 파싱 실패 시 기본 구조
