@@ -1,4 +1,5 @@
 import React from "react";
+import Markdown from "react-markdown";
 
 /* ── Loading Dots ── */
 const LoadingDots: React.FC = () => (
@@ -71,6 +72,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
 
       {/* 메시지 버블 */}
       <div
+        className={!isUser && !isLoading ? "markdown-body" : undefined}
         style={{
           maxWidth: "82%",
           padding: "15px 19px",
@@ -81,7 +83,6 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
           color: isUser ? "var(--c-cream)" : "var(--c-text)",
           fontSize: 14.5,
           lineHeight: 1.75,
-          whiteSpace: "pre-wrap",
           wordBreak: "break-word",
           boxShadow: isUser
             ? "0 2px 10px rgba(92,64,51,0.25)"
@@ -89,7 +90,13 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
           border: isUser ? "none" : "1px solid var(--c-border)",
         }}
       >
-        {isLoading ? <LoadingDots /> : content}
+        {isLoading ? (
+          <LoadingDots />
+        ) : isUser ? (
+          <span style={{ whiteSpace: "pre-wrap" }}>{content}</span>
+        ) : (
+          <Markdown>{content}</Markdown>
+        )}
       </div>
 
       {/* 유저 아바타 */}
