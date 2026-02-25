@@ -1,7 +1,7 @@
-# ⚖️ 변호사 광고 규정 검사기
+# 🔍 변호사 광고 규정 모니터링 시스템
 
-대한변호사협회 「변호사 광고에 관한 규정」(2025.2.6. 최종개정)을 기반으로
-변호사 광고의 규정 위반 여부를 **삼단논법**으로 분석해주는 AI 앱입니다.
+온라인상의 변호사 광고를 자동 크롤링하고,
+대한변호사협회 광고규정 위반 여부를 AI로 탐지하여 보고서를 생성하는 시스템입니다.
 
 ## 🏗️ 기술 스택
 
@@ -10,110 +10,85 @@
 | 프론트엔드 | React 18 + TypeScript + Vite |
 | 백엔드 | Cloudflare Pages Functions |
 | AI | Claude Sonnet (Anthropic API) |
+| 검색 | 네이버 블로그 검색 API |
 | 배포 | Cloudflare Pages |
+
+## 💰 비용 구조
+
+1차 키워드 필터로 API 비용 80% 절감:
+- 100페이지 중 의심 키워드 있는 ~20페이지만 AI 호출
+- Claude API: 월 $15~30 (2~4만원)
+- 네이버 API: 무료 (25,000건/일)
+- Cloudflare: 무료 티어
 
 ## 📁 프로젝트 구조
 
 ```
-lawyer-ad-checker/
-├── functions/                  # Cloudflare Pages Functions (서버사이드)
-│   └── api/
-│       └── chat.ts            # API 프록시 (API 키 보호)
+lawyer-ad-monitor/
+├── functions/api/           # Cloudflare Pages Functions
+│   ├── search.ts           # 네이버 검색 API 프록시
+│   ├── crawl.ts            # URL → 텍스트 추출
+│   ├── analyze.ts          # 키워드 필터 + AI 분석
+│   └── scan.ts             # crawl + analyze 통합
 ├── src/
-│   ├── components/            # UI 컴포넌트
-│   │   ├── Header.tsx         # 상단 헤더
-│   │   ├── ChatBubble.tsx     # 채팅 말풍선 (마크다운 렌더링)
-│   │   ├── WelcomeScreen.tsx  # 시작 화면 + 예시 질문
-│   │   ├── ChatInput.tsx      # 입력창
-│   │   └── index.ts           # barrel export
-│   ├── data/
-│   │   └── regulations.ts     # 광고규정 전문 + 시스템 프롬프트
-│   ├── services/
-│   │   └── api.ts             # API 호출 서비스 (재시도 로직 포함)
-│   ├── styles/
-│   │   └── global.css         # 글로벌 스타일
-│   ├── types/
-│   │   └── index.ts           # TypeScript 타입 정의
-│   ├── App.tsx                # 메인 앱 컨트롤러
-│   ├── main.tsx               # 엔트리 포인트
-│   └── vite-env.d.ts
-├── index.html
-├── package.json
-├── tsconfig.json
-├── tsconfig.functions.json
-├── vite.config.ts
-├── wrangler.toml
-└── .dev.vars                  # 로컬 환경변수 (API 키)
+│   ├── components/
+│   │   ├── ScannerPanel.tsx # URL/키워드 입력 + 배치 스캔
+│   │   ├── ResultsPanel.tsx # 결과 목록 + 필터 + 상세
+│   │   └── ReportPanel.tsx  # 보고서 생성 + 내보내기
+│   ├── services/api.ts      # 프론트엔드 API 호출
+│   ├── data/constants.ts    # 설정값, 키워드 등
+│   ├── types/index.ts       # TypeScript 타입
+│   ├── styles/global.css
+│   ├── App.tsx              # 메인 대시보드
+│   └── main.tsx
+├── .dev.vars                # 로컬 환경변수
+└── wrangler.toml
 ```
 
 ## 🚀 시작하기
 
-### 1단계: 의존성 설치
-
+### 1. 의존성 설치
 ```bash
 npm install
 ```
 
-### 2단계: 환경변수 설정
-
-`.dev.vars` 파일을 생성하고 Anthropic API 키를 설정하세요:
-
+### 2. 환경변수 설정
+`.dev.vars` 파일 수정:
 ```
-ANTHROPIC_API_KEY=sk-ant-api03-여기에-실제-API-키
+ANTHROPIC_API_KEY=sk-ant-api03-실제키
+
+# 선택: 네이버 API (없으면 URL 직접입력만 가능)
+NAVER_CLIENT_ID=네이버ID
+NAVER_CLIENT_SECRET=네이버시크릿
 ```
 
-> `.env.example` 파일을 참고하세요.
+네이버 API 키 발급: https://developers.naver.com/apps/
 
-### 3단계: 로컬 개발 서버 실행
-
-터미널 2개를 사용합니다:
-
+### 3. 로컬 실행
 ```bash
-# 터미널 1: Vite 프론트엔드 (포트 5173)
+# 프론트엔드
 npm run dev
 
-# 터미널 2: Cloudflare Pages Functions (포트 8788)
+# 별도 터미널에서 Cloudflare Functions
 npm run pages:dev
 ```
 
-또는 빌드 후 통합 실행:
-
-```bash
-npm run build
-npm run pages:dev
-```
-
-## ☁️ Cloudflare Pages 배포
-
-### 1단계: Cloudflare 계정 준비
-
-1. [Cloudflare](https://dash.cloudflare.com/) 계정 생성
-2. Wrangler CLI 로그인: `npx wrangler login`
-
-### 2단계: 환경변수 설정
-
-Cloudflare Dashboard에서:
-1. **Pages** → 프로젝트 선택
-2. **Settings** → **Environment variables**
-3. `ANTHROPIC_API_KEY` 추가 (Production + Preview 모두)
-
-### 3단계: 배포
-
+### 4. 배포
 ```bash
 npm run pages:deploy
 ```
 
+Cloudflare Dashboard에서 환경변수 설정 필수!
+
 ## 🔒 보안
 
-- **API 키는 절대 클라이언트에 노출되지 않습니다.**
-- 클라이언트 → `/api/chat` (Cloudflare Function) → Anthropic API 구조
-- API 키는 Cloudflare 환경변수에서만 관리
-- 요청 입력 길이 제한 및 CORS 정책 적용
+- API 키는 서버사이드(Cloudflare)에서만 관리
+- 클라이언트에 API 키 노출 없음
 
 ## 📜 주요 기능
 
-- **삼단논법 분석**: 대전제(법) → 소전제(행위) → 결론 구조로 명확한 판단
-- **마크다운 렌더링**: AI 응답을 보기 좋은 형식으로 표시
-- **대화 히스토리 저장**: 새로고침해도 대화 내용 유지 (LocalStorage)
-- **네트워크 재시도**: API 호출 실패 시 자동 재시도
-- **반응형 디자인**: 모바일/데스크톱 최적화
+- **자동 크롤링**: URL 입력 또는 키워드 검색으로 광고 페이지 수집
+- **2단계 분석**: 키워드 필터(1차) + AI 정밀 분석(2차)으로 비용 최적화
+- **삼단논법 보고**: 대전제→소전제→결론 형식의 위반 분석
+- **보고서 생성**: TXT/CSV 형식으로 내보내기
+- **배치 스캔**: 검색 결과 일괄 분석

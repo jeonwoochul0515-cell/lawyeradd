@@ -1,6 +1,8 @@
-name = "lawyer-ad-checker"
+name = "lawyer-ad-monitor"
 compatibility_date = "2024-01-01"
 pages_build_output_dir = "dist"
 
-# 환경변수는 Cloudflare Dashboard > Pages > Settings > Environment variables 에서 설정
+# Cloudflare Dashboard > Pages > Settings > Environment variables 에서 설정:
 # ANTHROPIC_API_KEY = "sk-ant-..."
+# NAVER_CLIENT_ID = "네이버 API 클라이언트 ID"
+# NAVER_CLIENT_SECRET = "네이버 API 시크릿"
