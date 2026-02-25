@@ -1,5 +1,5 @@
 name = "lawyer-ad-monitor"
-compatibility_date = "2024-01-01"
+compatibility_date = "2024-12-01"
 pages_build_output_dir = "dist"
 
 # Cloudflare Dashboard > Pages > Settings > Environment variables 에서 설정:
