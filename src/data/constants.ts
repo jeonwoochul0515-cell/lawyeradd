@@ -24,3 +24,20 @@ export const EXAMPLE_KEYWORDS = [
   "교통사고 변호사 무료상담",
   "성범죄 전문 변호사",
 ];
+
+/** 자동 스캔 기본 키워드 (10개) */
+export const DEFAULT_AUTO_KEYWORDS = [
+  "이혼변호사",
+  "형사전문",
+  "교통사고",
+  "성범죄",
+  "음주운전",
+  "마약",
+  "재산분할",
+  "상속",
+  "산업재해",
+  "의료사고",
+];
+
+/** 자동 스캔 URL 간 딜레이 (ms) */
+export const SCAN_DELAY_MS = 800;

@@ -1,4 +1,4 @@
-import type { ScanResult, SearchItem } from "../types";
+import type { ScanResult, SearchItem, AutoScanDiscoveryResult } from "../types";
 
 /** 단일 URL 스캔 (크롤링 + 분석 원스톱) */
 export async function scanUrl(url: string): Promise<ScanResult> {
@@ -27,6 +27,22 @@ export async function searchKeyword(
   const data: { success: boolean; data?: SearchItem[]; error?: string } = await res.json();
   if (!data.success) throw new Error(data.error || "검색 실패");
   return data.data || [];
+}
+
+/** 자동 스캔 Discovery (여러 키워드로 네이버 검색 → 중복 제거) */
+export async function autoScanDiscover(
+  keywords: string[],
+  maxResultsPerKeyword = 10
+): Promise<AutoScanDiscoveryResult> {
+  const res = await fetch("/api/auto-scan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ keywords, maxResultsPerKeyword }),
+  });
+
+  const data: { success: boolean; data?: AutoScanDiscoveryResult; error?: string } = await res.json();
+  if (!data.success) throw new Error(data.error || "자동 스캔 검색 실패");
+  return data.data!;
 }
 
 /** 보고서 텍스트 생성 (클라이언트 사이드) */

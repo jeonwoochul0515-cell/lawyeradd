@@ -141,7 +141,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     // 2차 AI 정밀 분석
-    const truncatedText = text.slice(0, 4000);
+    const truncatedText = text.slice(0, 3000);
     const userMessage = `다음 변호사 광고 텍스트를 분석하세요.
 
 [URL] ${url}
@@ -151,26 +151,34 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 [광고 텍스트]
 ${truncatedText}`;
 
-    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2048,
-        system: ANALYSIS_SYSTEM,
-        messages: [{ role: "user", content: userMessage }],
-      }),
-    });
+    // 429 재시도 로직 (exponential backoff, 최대 2회)
+    let anthropicRes: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1024,
+          system: ANALYSIS_SYSTEM,
+          messages: [{ role: "user", content: userMessage }],
+        }),
+      });
 
-    if (!anthropicRes.ok) {
-      const errText = await anthropicRes.text();
-      console.error("Anthropic API Error:", anthropicRes.status, errText);
+      if (anthropicRes.status !== 429 || attempt >= 2) break;
+      const delay = Math.pow(2, attempt) * 1000; // 1s, 2s
+      await new Promise((r) => setTimeout(r, delay));
+    }
+
+    if (!anthropicRes || !anthropicRes.ok) {
+      const errText = anthropicRes ? await anthropicRes.text() : "No response";
+      console.error("Anthropic API Error:", anthropicRes?.status, errText);
       return Response.json(
-        { success: false, error: `AI 분석 오류 (${anthropicRes.status})` },
+        { success: false, error: `AI 분석 오류 (${anthropicRes?.status})` },
         { status: 500 }
       );
     }

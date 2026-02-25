@@ -61,5 +61,17 @@ export interface ReportData {
   results: ScanResult[];
 }
 
+/** 자동 스캔 검색 아이템 (SearchItem + keyword) */
+export interface AutoScanItem extends SearchItem {
+  keyword: string;
+}
+
+/** 자동 스캔 Discovery 결과 */
+export interface AutoScanDiscoveryResult {
+  totalFound: number;
+  keywords: string[];
+  items: AutoScanItem[];
+}
+
 /** 앱 탭 */
 export type TabId = "scanner" | "results" | "report";

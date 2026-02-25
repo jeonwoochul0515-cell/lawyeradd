@@ -46,7 +46,7 @@ const NAV_LABELS: Record<TabId, string> = {
 };
 
 const NAV_DESCS: Record<TabId, string> = {
-  scanner: "URL · 키워드 광고 스캔",
+  scanner: "자동 광고 모니터링",
   results: "스캔 결과 목록 & 분석",
   report: "종합 보고서 생성",
 };

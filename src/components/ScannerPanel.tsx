@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
-import type { ScanResult, SearchItem } from "../types";
-import { scanUrl, searchKeyword } from "../services/api";
-import { EXAMPLE_KEYWORDS } from "../data/constants";
+import type { ScanResult, SearchItem, AutoScanItem } from "../types";
+import { scanUrl, searchKeyword, autoScanDiscover } from "../services/api";
+import { EXAMPLE_KEYWORDS, DEFAULT_AUTO_KEYWORDS, SCAN_DELAY_MS } from "../data/constants";
 
 interface Props {
   onResult: (result: ScanResult) => void;
@@ -16,6 +16,9 @@ interface HistoryEntry {
   status: "clean" | "warning" | "violation";
   scannedAt: string;
 }
+
+type ScanMode = "auto" | "keyword" | "url";
+type AutoPhase = "idle" | "discovery" | "scanning" | "done";
 
 // ── 상태 배지 컴포넌트 ────────────────────────────────────────
 const StatusBadge: React.FC<{ status: "clean" | "warning" | "violation" }> = ({ status }) => {
@@ -67,7 +70,7 @@ const KeywordReadyIllustration = () => (
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────
 const ScannerPanel: React.FC<Props> = ({ onResult, onKeywordChange }) => {
-  const [mode, setMode] = useState<"url" | "keyword">("url");
+  const [mode, setMode] = useState<ScanMode>("auto");
   const [urlInput, setUrlInput] = useState("");
   const [kwInput, setKwInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -81,11 +84,112 @@ const ScannerPanel: React.FC<Props> = ({ onResult, onKeywordChange }) => {
   const urlInputRef = useRef<HTMLInputElement>(null);
   const kwInputRef = useRef<HTMLInputElement>(null);
 
+  // ── 자동 스캔 상태 ──────────────────────────────────────────
+  const [autoKeywords, setAutoKeywords] = useState<string[]>([...DEFAULT_AUTO_KEYWORDS]);
+  const [newAutoKw, setNewAutoKw] = useState("");
+  const [autoPerKw, setAutoPerKw] = useState(10);
+  const [autoPhase, setAutoPhase] = useState<AutoPhase>("idle");
+  const [autoDiscovered, setAutoDiscovered] = useState<AutoScanItem[]>([]);
+  const [autoStats, setAutoStats] = useState({ violation: 0, warning: 0, clean: 0, error: 0 });
+  const abortRef = useRef<AbortController | null>(null);
+
   // 모드 전환 시 포커스
   useEffect(() => {
     if (mode === "url") urlInputRef.current?.focus();
-    else kwInputRef.current?.focus();
+    else if (mode === "keyword") kwInputRef.current?.focus();
   }, [mode]);
+
+  // ── 자동 스캔 키워드 관리 ──────────────────────────────────
+  const addAutoKeyword = () => {
+    const kw = newAutoKw.trim();
+    if (kw && !autoKeywords.includes(kw)) {
+      setAutoKeywords((prev) => [...prev, kw]);
+      setNewAutoKw("");
+    }
+  };
+  const removeAutoKeyword = (kw: string) => {
+    setAutoKeywords((prev) => prev.filter((k) => k !== kw));
+  };
+
+  // ── 자동 스캔 시작 ─────────────────────────────────────────
+  const handleAutoScan = async () => {
+    if (autoKeywords.length === 0 || loading) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setLoading(true);
+    setError("");
+    setAutoPhase("discovery");
+    setAutoDiscovered([]);
+    setAutoStats({ violation: 0, warning: 0, clean: 0, error: 0 });
+    onKeywordChange?.(autoKeywords.join(", "));
+
+    try {
+      // Phase 1: Discovery
+      const discovery = await autoScanDiscover(autoKeywords, autoPerKw);
+      if (controller.signal.aborted) return;
+
+      setAutoDiscovered(discovery.items);
+      setAutoPhase("scanning");
+      setProgress({ current: 0, total: discovery.items.length });
+
+      // Phase 2: Scanning
+      const newHistory: HistoryEntry[] = [];
+      const stats = { violation: 0, warning: 0, clean: 0, error: 0 };
+
+      for (let i = 0; i < discovery.items.length; i++) {
+        if (controller.signal.aborted) break;
+
+        const item = discovery.items[i];
+        setScanningUrl(item.link);
+        setProgress({ current: i + 1, total: discovery.items.length });
+
+        try {
+          const result = await scanUrl(item.link);
+          if (controller.signal.aborted) break;
+
+          onResult(result);
+          stats[result.status]++;
+          setAutoStats({ ...stats });
+          newHistory.push({
+            id: result.id,
+            url: result.url,
+            title: result.title || item.title || item.link,
+            status: result.status,
+            scannedAt: result.scannedAt,
+          });
+        } catch {
+          stats.error++;
+          setAutoStats({ ...stats });
+        }
+
+        if (i < discovery.items.length - 1 && !controller.signal.aborted) {
+          await new Promise((r) => setTimeout(r, SCAN_DELAY_MS));
+        }
+      }
+
+      setHistory((prev) => [...newHistory, ...prev].slice(0, 20));
+      setAutoPhase("done");
+    } catch (err: unknown) {
+      if (!controller.signal.aborted) {
+        setError(err instanceof Error ? err.message : "자동 스캔 실패");
+        setAutoPhase("idle");
+      }
+    } finally {
+      setLoading(false);
+      setScanningUrl("");
+      abortRef.current = null;
+    }
+  };
+
+  // ── 자동 스캔 중지 ─────────────────────────────────────────
+  const handleAutoStop = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setLoading(false);
+    setScanningUrl("");
+    setAutoPhase("done");
+  };
 
   // ── 단일 URL 스캔 ──────────────────────────────────────────
   const handleUrlScan = async () => {
@@ -203,18 +307,19 @@ const ScannerPanel: React.FC<Props> = ({ onResult, onKeywordChange }) => {
     <div className="slide-up" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
       {/* ────────────────────────────────────────────────────
-          1. 모드 세그먼트 컨트롤
+          1. 모드 세그먼트 컨트롤 (3모드)
       ──────────────────────────────────────────────────── */}
       <div className="segment-control">
         <button
-          className={`segment-btn${mode === "url" ? " active" : ""}`}
-          onClick={() => { setMode("url"); setError(""); }}
+          className={`segment-btn${mode === "auto" ? " active" : ""}`}
+          onClick={() => { setMode("auto"); setError(""); }}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
           </svg>
-          URL 직접 입력
+          자동 스캔
         </button>
         <button
           className={`segment-btn${mode === "keyword" ? " active" : ""}`}
@@ -224,12 +329,289 @@ const ScannerPanel: React.FC<Props> = ({ onResult, onKeywordChange }) => {
             <circle cx="11" cy="11" r="8"/>
             <line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
-          키워드 검색
+          키워드
+        </button>
+        <button
+          className={`segment-btn${mode === "url" ? " active" : ""}`}
+          onClick={() => { setMode("url"); setError(""); }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+          URL
         </button>
       </div>
 
       {/* ────────────────────────────────────────────────────
-          2a. URL 모드
+          2a. 자동 스캔 모드
+      ──────────────────────────────────────────────────── */}
+      {mode === "auto" && (
+        <div className="glass-card" style={{ padding: 24 }}>
+          {/* 헤더 */}
+          <div style={{ marginBottom: 20 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: "#E2E8F0", marginBottom: 5 }}>
+              자동 광고 위반 탐지
+            </h3>
+            <p style={{ fontSize: 12.5, color: "#64748B", lineHeight: 1.5 }}>
+              선택한 키워드로 네이버 블로그를 자동 검색하고, 발견된 모든 광고를 AI가 분석합니다.
+            </p>
+          </div>
+
+          {/* 키워드 칩 선택 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              검색 키워드 ({autoKeywords.length}개)
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {autoKeywords.map((kw) => (
+                <span
+                  key={kw}
+                  className="keyword-chip"
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    background: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.3)",
+                    color: "#A78BFA", cursor: loading ? "default" : "pointer",
+                  }}
+                >
+                  {kw}
+                  {!loading && (
+                    <span
+                      onClick={() => removeAutoKeyword(kw)}
+                      style={{ fontSize: 14, lineHeight: 1, opacity: 0.7, cursor: "pointer" }}
+                    >
+                      x
+                    </span>
+                  )}
+                </span>
+              ))}
+            </div>
+
+            {/* 키워드 추가 입력 */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                className="input-field"
+                style={{ flex: 1, padding: "8px 12px", fontSize: 12.5 }}
+                value={newAutoKw}
+                onChange={(e) => setNewAutoKw(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addAutoKeyword()}
+                placeholder="키워드 추가..."
+                disabled={loading}
+              />
+              <button
+                className="keyword-chip"
+                style={{
+                  cursor: "pointer", padding: "8px 14px", fontSize: 12,
+                  background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.2)",
+                  color: "#60A5FA", borderRadius: 8, fontFamily: "var(--font)",
+                }}
+                onClick={addAutoKeyword}
+                disabled={loading || !newAutoKw.trim()}
+              >
+                + 추가
+              </button>
+            </div>
+          </div>
+
+          {/* 키워드당 결과 수 */}
+          <div style={{ marginBottom: 20, display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 12, color: "#64748B" }}>키워드당 결과 수:</span>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[5, 10, 20, 30].map((n) => (
+                <button
+                  key={n}
+                  className="keyword-chip"
+                  style={{
+                    cursor: "pointer", padding: "5px 12px", fontSize: 12,
+                    background: autoPerKw === n ? "rgba(124,58,237,0.2)" : "rgba(255,255,255,0.04)",
+                    border: autoPerKw === n ? "1px solid rgba(124,58,237,0.4)" : "1px solid rgba(255,255,255,0.08)",
+                    color: autoPerKw === n ? "#A78BFA" : "#64748B",
+                    borderRadius: 8, fontFamily: "var(--font)",
+                  }}
+                  onClick={() => setAutoPerKw(n)}
+                  disabled={loading}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 자동 스캔 시작 / 중지 버튼 */}
+          {autoPhase === "idle" || autoPhase === "done" ? (
+            <button
+              className="btn-primary"
+              style={{
+                width: "100%", padding: "16px", fontSize: 15, fontWeight: 700,
+                borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              }}
+              onClick={() => { setAutoPhase("idle"); handleAutoScan(); }}
+              disabled={loading || autoKeywords.length === 0}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              자동 스캔 시작
+            </button>
+          ) : (
+            <button
+              style={{
+                width: "100%", padding: "16px", fontSize: 15, fontWeight: 700,
+                borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)",
+                color: "#FCA5A5", cursor: "pointer", fontFamily: "var(--font)",
+              }}
+              onClick={handleAutoStop}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="6" y="6" width="12" height="12" rx="2"/>
+              </svg>
+              스캔 중지
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────
+          자동 스캔 Progress (Phase 1: Discovery)
+      ──────────────────────────────────────────────────── */}
+      {mode === "auto" && autoPhase === "discovery" && (
+        <div className="scan-progress-card slide-up">
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="spinner" />
+            <div>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: "#E2E8F0" }}>
+                Phase 1: 광고 검색 중...
+              </div>
+              <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                {autoKeywords.length}개 키워드로 네이버 블로그를 검색하고 있습니다
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────
+          자동 스캔 Progress (Phase 2: Scanning)
+      ──────────────────────────────────────────────────── */}
+      {mode === "auto" && autoPhase === "scanning" && (
+        <div className="scan-progress-card slide-up">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="spinner" />
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: "#E2E8F0" }}>
+                  Phase 2: AI 분석 중 ({progress.current} / {progress.total})
+                </div>
+                <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                  발견된 {autoDiscovered.length}개 URL을 순차 분석하고 있습니다
+                </div>
+              </div>
+            </div>
+            {estimatedSec > 0 && (
+              <div style={{ fontSize: 11.5, color: "#7C3AED", fontWeight: 600 }}>
+                약 {estimatedSec < 60 ? `${Math.ceil(estimatedSec)}초` : `${Math.ceil(estimatedSec / 60)}분`} 남음
+              </div>
+            )}
+          </div>
+
+          {/* 프로그레스 바 */}
+          <div style={{ marginBottom: 12 }}>
+            <div className="progress-bar-track">
+              <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+              <div style={{ fontSize: 11, color: "#475569", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {scanningUrl}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", flexShrink: 0, marginLeft: 8 }}>
+                {pct}%
+              </div>
+            </div>
+          </div>
+
+          {/* 실시간 통계 */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {autoStats.violation > 0 && (
+              <span className="badge-violation" style={{ fontSize: 11 }}>
+                위반 {autoStats.violation}
+              </span>
+            )}
+            {autoStats.warning > 0 && (
+              <span className="badge-warning" style={{ fontSize: 11 }}>
+                주의 {autoStats.warning}
+              </span>
+            )}
+            {autoStats.clean > 0 && (
+              <span className="badge-clean" style={{ fontSize: 11 }}>
+                적법 {autoStats.clean}
+              </span>
+            )}
+            {autoStats.error > 0 && (
+              <span style={{
+                padding: "3px 9px", borderRadius: 12, fontSize: 11, fontWeight: 700,
+                background: "rgba(239,68,68,0.12)", color: "#FCA5A5",
+                border: "1px solid rgba(239,68,68,0.2)",
+              }}>
+                오류 {autoStats.error}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────
+          자동 스캔 완료 요약
+      ──────────────────────────────────────────────────── */}
+      {mode === "auto" && autoPhase === "done" && (
+        <div className="glass-card slide-up" style={{ padding: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#E2E8F0" }}>
+              자동 스캔 완료
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <span style={{
+              padding: "6px 14px", borderRadius: 12, fontSize: 12, fontWeight: 700,
+              background: "rgba(59,130,246,0.12)", color: "#60A5FA",
+              border: "1px solid rgba(59,130,246,0.2)",
+            }}>
+              총 발견 {autoDiscovered.length}건
+            </span>
+            <span style={{
+              padding: "6px 14px", borderRadius: 12, fontSize: 12, fontWeight: 700,
+              background: "rgba(59,130,246,0.12)", color: "#60A5FA",
+              border: "1px solid rgba(59,130,246,0.2)",
+            }}>
+              분석 {autoStats.violation + autoStats.warning + autoStats.clean}건
+            </span>
+            {autoStats.violation > 0 && (
+              <span className="badge-violation" style={{ padding: "6px 14px", fontSize: 12 }}>
+                위반 {autoStats.violation}
+              </span>
+            )}
+            {autoStats.warning > 0 && (
+              <span className="badge-warning" style={{ padding: "6px 14px", fontSize: 12 }}>
+                주의 {autoStats.warning}
+              </span>
+            )}
+            {autoStats.clean > 0 && (
+              <span className="badge-clean" style={{ padding: "6px 14px", fontSize: 12 }}>
+                적법 {autoStats.clean}
+              </span>
+            )}
+          </div>
+          <p style={{ fontSize: 12, color: "#64748B", marginTop: 12 }}>
+            결과 탭에서 상세 분석을 확인하세요.
+          </p>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────
+          2b. URL 모드
       ──────────────────────────────────────────────────── */}
       {mode === "url" && (
         <div className="glass-card" style={{ padding: 24 }}>
@@ -317,7 +699,7 @@ const ScannerPanel: React.FC<Props> = ({ onResult, onKeywordChange }) => {
       )}
 
       {/* ────────────────────────────────────────────────────
-          2b. 키워드 모드
+          2c. 키워드 모드
       ──────────────────────────────────────────────────── */}
       {mode === "keyword" && (
         <div className="glass-card" style={{ padding: 24 }}>
@@ -511,9 +893,9 @@ const ScannerPanel: React.FC<Props> = ({ onResult, onKeywordChange }) => {
       )}
 
       {/* ────────────────────────────────────────────────────
-          3. 스캔 진행 상태 카드
+          3. 스캔 진행 상태 카드 (URL/키워드 모드)
       ──────────────────────────────────────────────────── */}
-      {loading && scanningUrl && (
+      {loading && scanningUrl && mode !== "auto" && (
         <div className="scan-progress-card slide-up">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
